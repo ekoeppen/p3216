@@ -37,6 +37,8 @@ enum Opcode {
     SetHigh = 15,
     RightShift = 16,
     LeftShift = 17,
+    SignedDiv = 18,
+    ArithmeticRightShift = 19,
     Syscall = 31,
 }
 
@@ -183,6 +185,8 @@ fn decode(bytes: &[u8]) -> Instruction {
         15 => Opcode::SetHigh,
         16 => Opcode::RightShift,
         17 => Opcode::LeftShift,
+        18 => Opcode::SignedDiv,
+        19 => Opcode::ArithmeticRightShift,
         31 => Opcode::Syscall,
         _ => Opcode::Illegal,
     };
@@ -405,6 +409,11 @@ fn execute(vm: &mut VM) {
             Opcode::Sub => apply_binary(instruction, u32::wrapping_sub, vm),
             Opcode::Mul => apply_binary(instruction, u32::wrapping_mul, vm),
             Opcode::Div => apply_binary(instruction, u32::wrapping_div, vm),
+            Opcode::SignedDiv => apply_binary(
+                instruction,
+                |a, b| i32::wrapping_div(a as i32, b as i32) as u32,
+                vm,
+            ),
             Opcode::Load => load_inst(instruction, vm),
             Opcode::Store => store_inst(instruction, vm),
             Opcode::SetLow => set_inst(instruction, Word::Low, vm),
@@ -412,6 +421,11 @@ fn execute(vm: &mut VM) {
             Opcode::RightShift => apply_binary(instruction, u32::wrapping_shr, vm),
             Opcode::LeftShift => apply_binary(instruction, u32::wrapping_shl, vm),
             Opcode::Syscall => syscall(instruction, vm),
+            Opcode::ArithmeticRightShift => apply_binary(
+                instruction,
+                |a, b| i32::wrapping_shr(a as i32, b) as u32,
+                vm,
+            ),
             Opcode::Illegal => (),
             Opcode::Undecoded => (),
         }

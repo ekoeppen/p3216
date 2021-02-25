@@ -16,6 +16,7 @@ const PC: usize = 15;
 
 const ZERO: u32 = 1;
 const NEGATIVE: u32 = 2;
+const OVERFLOW: u32 = 4;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 enum Opcode {
@@ -333,6 +334,21 @@ fn apply_binary(instruction: Instruction, operation: fn(u32, u32) -> u32, vm: &m
     set_flags(instruction, vm);
 }
 
+fn apply_binary_overflow(
+    instruction: Instruction,
+    operation: fn(u32, u32) -> (u32, bool),
+    vm: &mut VM,
+) {
+    let (result, overflow): (u32, bool) = if instruction.immediate {
+        operation(vm.registers[instruction.op1], instruction.imm as u32)
+    } else {
+        operation(vm.registers[instruction.op1], vm.registers[instruction.op2])
+    };
+    vm.registers[instruction.target] = result;
+    set_flags(instruction, vm);
+    vm.registers[FLAGS] = vm.registers[FLAGS] & !OVERFLOW | if overflow { OVERFLOW } else { 0 };
+}
+
 fn apply_unary(instruction: Instruction, operation: fn(u32) -> u32, vm: &mut VM) {
     vm.registers[instruction.target] = operation(vm.registers[instruction.op1]);
     set_flags(instruction, vm);
@@ -405,10 +421,10 @@ fn execute(vm: &mut VM) {
             Opcode::Or => apply_binary(instruction, u32::bitor, vm),
             Opcode::Xor => apply_binary(instruction, u32::bitxor, vm),
             Opcode::Not => apply_unary(instruction, u32::not, vm),
-            Opcode::Add => apply_binary(instruction, u32::wrapping_add, vm),
-            Opcode::Sub => apply_binary(instruction, u32::wrapping_sub, vm),
-            Opcode::Mul => apply_binary(instruction, u32::wrapping_mul, vm),
-            Opcode::Div => apply_binary(instruction, u32::wrapping_div, vm),
+            Opcode::Add => apply_binary_overflow(instruction, u32::overflowing_add, vm),
+            Opcode::Sub => apply_binary_overflow(instruction, u32::overflowing_sub, vm),
+            Opcode::Mul => apply_binary_overflow(instruction, u32::overflowing_mul, vm),
+            Opcode::Div => apply_binary_overflow(instruction, u32::overflowing_div, vm),
             Opcode::SignedDiv => apply_binary(
                 instruction,
                 |a, b| i32::wrapping_div(a as i32, b as i32) as u32,
@@ -418,8 +434,8 @@ fn execute(vm: &mut VM) {
             Opcode::Store => store_inst(instruction, vm),
             Opcode::SetLow => set_inst(instruction, Word::Low, vm),
             Opcode::SetHigh => set_inst(instruction, Word::High, vm),
-            Opcode::RightShift => apply_binary(instruction, u32::wrapping_shr, vm),
-            Opcode::LeftShift => apply_binary(instruction, u32::wrapping_shl, vm),
+            Opcode::RightShift => apply_binary_overflow(instruction, u32::overflowing_shr, vm),
+            Opcode::LeftShift => apply_binary_overflow(instruction, u32::overflowing_shl, vm),
             Opcode::Syscall => syscall(instruction, vm),
             Opcode::ArithmeticRightShift => apply_binary(
                 instruction,

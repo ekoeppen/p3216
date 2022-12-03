@@ -2,8 +2,10 @@ use clap::{App, Arg};
 use std::fs::File;
 use std::io::Read;
 use std::io::Write;
+use std::mem;
 use std::ops::Not;
 use std::ops::{BitAnd, BitOr, BitXor};
+use std::os::unix::io::{AsRawFd, FromRawFd};
 
 const MEMORY_SIZE: usize = 128 * 1024;
 
@@ -56,6 +58,10 @@ enum Syscall {
     MemDump = 3,
     VMDump = 4,
     DebugCtrl = 5,
+    Open = 6,
+    Close = 7,
+    Read = 8,
+    Write = 9,
 }
 
 #[derive(Debug)]
@@ -221,6 +227,10 @@ fn syscall_number(num: u32) -> Syscall {
         3 => Syscall::MemDump,
         4 => Syscall::VMDump,
         5 => Syscall::DebugCtrl,
+        6 => Syscall::Open,
+        7 => Syscall::Close,
+        8 => Syscall::Read,
+        9 => Syscall::Write,
         _ => Syscall::Quit,
     }
 }
@@ -384,6 +394,41 @@ fn syscall(instruction: Instruction, vm: &mut VM) {
         }
         Syscall::Quit => std::process::exit(vm.registers[instruction.target] as i32),
         Syscall::DebugCtrl => vm.debug = vm.registers[instruction.target] != 0,
+        Syscall::Read => {
+            let mut b = [0];
+            let mut f = unsafe { File::from_raw_fd(vm.registers[instruction.target] as i32) };
+            let n: i32 = match f.read(&mut b) {
+                Ok(n) => if n > 0 { b[0] as i32 } else { - 1},
+                Err(_) => -1,
+            };
+            vm.registers[instruction.op1] = n as u32;
+            mem::forget(f);
+        }
+        Syscall::Write => {
+            let mut f = unsafe { File::from_raw_fd(vm.registers[instruction.target] as i32) };
+            let _ = f.write(&[vm.registers[instruction.op1] as u8]);
+            mem::forget(f);
+        }
+        Syscall::Open => {
+            let p = vm.registers[instruction.target] as usize;
+            let n = vm.registers[instruction.op1] as usize;
+            let path = String::from_utf8(vm.memory[p..p + n].to_vec()).unwrap();
+            match File::open(path) {
+                Ok(f) => {
+                    vm.registers[instruction.target] = f.as_raw_fd() as u32;
+                    vm.registers[1] = 0;
+                    mem::forget(f);
+                },
+                Err(_) => {
+                    vm.registers[instruction.target] = 0;
+                    vm.registers[1] = u32::MAX;
+                },
+            };
+        }
+        Syscall::Close => {
+            let _ = unsafe { File::from_raw_fd(vm.registers[instruction.target] as i32) };
+            vm.registers[vm.registers[instruction.op1] as usize] = 0;
+        }
     };
 }
 

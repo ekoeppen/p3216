@@ -1,4 +1,3 @@
-use clap::{App, Arg};
 use std::fs::File;
 use std::io::Read;
 use std::io::Write;
@@ -7,7 +6,7 @@ use std::ops::Not;
 use std::ops::{BitAnd, BitOr, BitXor};
 use std::os::unix::io::{AsRawFd, FromRawFd};
 
-const MEMORY_SIZE: usize = 128 * 1024;
+const MEMORY_SIZE: usize = 512 * 1024;
 
 // Opcode 8, target 4, op1 4, op2 4, spare: 12
 // Opcode 8, target 4, op1 4, imm 16
@@ -62,6 +61,8 @@ enum Syscall {
     Close = 7,
     Read = 8,
     Write = 9,
+    Argc = 10,
+    Arg = 11,
 }
 
 #[derive(Debug)]
@@ -88,8 +89,8 @@ struct Instruction {
 struct VM {
     debug: bool,
     registers: [u32; 16],
-    memory: Box<[u8; MEMORY_SIZE]>,
-    instruction_cache: Box<[Instruction; MEMORY_SIZE]>,
+    memory: Vec<u8>,
+    instruction_cache: Vec<Instruction>,
 }
 
 fn print_vm(vm: &VM) {
@@ -231,6 +232,8 @@ fn syscall_number(num: u32) -> Syscall {
         7 => Syscall::Close,
         8 => Syscall::Read,
         9 => Syscall::Write,
+        10 => Syscall::Argc,
+        11 => Syscall::Arg,
         _ => Syscall::Quit,
     }
 }
@@ -398,7 +401,13 @@ fn syscall(instruction: Instruction, vm: &mut VM) {
             let mut b = [0];
             let mut f = unsafe { File::from_raw_fd(vm.registers[instruction.target] as i32) };
             let n: i32 = match f.read(&mut b) {
-                Ok(n) => if n > 0 { b[0] as i32 } else { - 1},
+                Ok(n) => {
+                    if n > 0 {
+                        b[0] as i32
+                    } else {
+                        -1
+                    }
+                }
                 Err(_) => -1,
             };
             vm.registers[instruction.op1] = n as u32;
@@ -418,16 +427,32 @@ fn syscall(instruction: Instruction, vm: &mut VM) {
                     vm.registers[instruction.target] = f.as_raw_fd() as u32;
                     vm.registers[1] = 0;
                     mem::forget(f);
-                },
+                }
                 Err(_) => {
                     vm.registers[instruction.target] = 0;
                     vm.registers[1] = u32::MAX;
-                },
+                }
             };
         }
         Syscall::Close => {
             let _ = unsafe { File::from_raw_fd(vm.registers[instruction.target] as i32) };
             vm.registers[vm.registers[instruction.op1] as usize] = 0;
+        }
+        Syscall::Argc => {
+            vm.registers[instruction.target] = std::env::args().count() as u32;
+        }
+        Syscall::Arg => {
+            let a = vm.registers[instruction.target] as usize;
+            let n = vm.registers[instruction.op1] as usize;
+            let addr = vm.registers[instruction.op1 + 1] as usize;
+            match std::env::args().nth(a) {
+                Some(arg) => {
+                    let r = if n < arg.len() { n } else { arg.len() };
+                    vm.memory[addr..addr + r].copy_from_slice(&arg.as_bytes()[0..r]);
+                    vm.registers[instruction.op1 + 1] = r as u32;
+                }
+                None => vm.registers[instruction.op1 + 1] = 0,
+            }
         }
     };
 }
@@ -504,35 +529,36 @@ fn run(image_file_name: &str, debug: bool) -> std::io::Result<()> {
     let mut vm = VM {
         debug,
         registers: [0; 16],
-        memory: image,
-        instruction_cache: Box::new(
-            [Instruction {
-                opcode: Opcode::Undecoded,
-                if_negative: false,
-                if_zero: false,
-                target: 0,
-                op1: 0,
-                op2: 0,
-                imm: 0,
-                immediate: false,
-            }; MEMORY_SIZE],
-        ),
+        memory: Vec::new(),
+        instruction_cache: Vec::new(),
     };
+    vm.memory.resize(MEMORY_SIZE, 0);
+    vm.instruction_cache.resize(
+        MEMORY_SIZE,
+        Instruction {
+            opcode: Opcode::Undecoded,
+            if_negative: false,
+            if_zero: false,
+            target: 0,
+            op1: 0,
+            op2: 0,
+            imm: 0,
+            immediate: false,
+        },
+    );
+    vm.memory[0..image.len()].copy_from_slice(&image[0..image.len()]);
     init(&mut vm);
     execute(&mut vm);
     Ok(())
 }
 
 fn main() {
-    let app = App::new("p3216")
-        .version("0.1")
-        .arg(Arg::with_name("DEBUG").short("d").long("debug"))
-        .arg(Arg::with_name("IMAGE").required(true).index(1));
-    let matches = app.get_matches();
-    let image_file_name = matches.value_of("IMAGE").unwrap();
-    let debug = matches.is_present("DEBUG");
-    match run(image_file_name, debug) {
-        Ok(_) => (),
-        Err(e) => println!("Error {}", e),
-    };
+    let debug = false;
+    match std::env::args().nth(1) {
+        Some(image_file_name) => match run(&image_file_name, debug) {
+            Ok(_) => (),
+            Err(e) => println!("Error {}", e),
+        },
+        None => println!("Usage: p3212 <IMAGE>"),
+    }
 }

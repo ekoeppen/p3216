@@ -27,7 +27,7 @@ const OVERFLOW: u32 = 4;
 
 const VERSION: Version = Version {
     major: 1,
-    minor: 3,
+    minor: 4,
     patch: 0,
 };
 
@@ -79,6 +79,8 @@ enum Syscall {
     Write = 13,
     Read = 14,
     Version = 15,
+    Pwd = 16,
+    Cwd = 17,
 }
 
 #[derive(Debug)]
@@ -254,6 +256,8 @@ fn syscall_number(num: u32) -> Syscall {
         13 => Syscall::Write,
         14 => Syscall::Read,
         15 => Syscall::Version,
+        16 => Syscall::Pwd,
+        17 => Syscall::Cwd,
         _ => Syscall::Quit,
     }
 }
@@ -480,8 +484,7 @@ fn syscall(instruction: Instruction, vm: &mut VM) {
                     mem::forget(f);
                 }
                 Err(_) => {
-                    vm.registers[instruction.target] = 0;
-                    vm.registers[1] = u32::MAX;
+                    vm.registers[instruction.target] = u32::MAX;
                 }
             };
         }
@@ -491,13 +494,12 @@ fn syscall(instruction: Instruction, vm: &mut VM) {
             let path = String::from_utf8(vm.memory[p..p + n].to_vec()).unwrap();
             match File::create(path) {
                 Ok(f) => {
-                    vm.registers[instruction.target] = f.as_raw_fd() as u32;
-                    vm.registers[1] = 0;
+                    vm.registers[instruction.target] = 0;
+                    vm.registers[instruction.op1] = f.as_raw_fd() as u32;
                     mem::forget(f);
                 }
                 Err(_) => {
-                    vm.registers[instruction.target] = 0;
-                    vm.registers[1] = u32::MAX;
+                    vm.registers[instruction.target] = u32::MAX;
                 }
             };
         }
@@ -520,6 +522,29 @@ fn syscall(instruction: Instruction, vm: &mut VM) {
                 }
                 None => vm.registers[instruction.op1 + 1] = 0,
             }
+        }
+        Syscall::Pwd => {
+            let addr = vm.registers[instruction.target] as usize;
+            let n = vm.registers[instruction.op1] as usize;
+            let p = std::env::current_dir().unwrap();
+            let path = p.to_str().unwrap();
+            let r = if n < path.len() { n } else { path.len() };
+            vm.memory[addr..addr + r].copy_from_slice(&path.as_bytes()[0..r]);
+            vm.registers[instruction.target] = r as u32;
+        }
+        Syscall::Cwd => {
+            let p = vm.registers[instruction.target] as usize;
+            let n = vm.registers[instruction.op1] as usize;
+            let path = String::from_utf8(vm.memory[p..p + n].to_vec()).unwrap();
+            match std::env::set_current_dir(path) {
+                Ok(f) => {
+                    vm.registers[instruction.target] = 0;
+                    mem::forget(f);
+                }
+                Err(_) => {
+                    vm.registers[instruction.target] = u32::MAX;
+                }
+            };
         }
         Syscall::Version => {
             vm.registers[instruction.target] = VERSION.major;

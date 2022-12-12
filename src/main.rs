@@ -12,7 +12,7 @@ struct Version {
     patch: u32,
 }
 
-const MEMORY_SIZE: usize = 512 * 1024;
+const MEMORY_SIZE: usize = 2 * 1024 * 1024;
 
 // Opcode 8, target 4, op1 4, op2 4, spare: 12
 // Opcode 8, target 4, op1 4, imm 16
@@ -28,7 +28,7 @@ const OVERFLOW: u32 = 4;
 const VERSION: Version = Version {
     major: 1,
     minor: 4,
-    patch: 0,
+    patch: 1,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq)]

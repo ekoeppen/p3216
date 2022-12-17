@@ -1,3 +1,6 @@
+use libc::{posix_openpt, unlockpt, grantpt, ptsname};
+use termios::*;
+use std::ffi::CStr;
 use std::fs::File;
 use std::io::Read;
 use std::io::Write;
@@ -27,8 +30,8 @@ const OVERFLOW: u32 = 4;
 
 const VERSION: Version = Version {
     major: 1,
-    minor: 4,
-    patch: 1,
+    minor: 6,
+    patch: 0,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -81,6 +84,11 @@ enum Syscall {
     Version = 15,
     Pwd = 16,
     Cwd = 17,
+    Grantpt = 18,
+    Unlockpt = 19,
+    Ptsname = 20,
+    PosixOpenpt = 21,
+    CfMakeRaw = 22,
 }
 
 #[derive(Debug)]
@@ -258,6 +266,11 @@ fn syscall_number(num: u32) -> Syscall {
         15 => Syscall::Version,
         16 => Syscall::Pwd,
         17 => Syscall::Cwd,
+        18 => Syscall::Grantpt,
+        19 => Syscall::Unlockpt,
+        20 => Syscall::Ptsname,
+        21 => Syscall::PosixOpenpt,
+        22 => Syscall::CfMakeRaw,
         _ => Syscall::Quit,
     }
 }
@@ -477,7 +490,7 @@ fn syscall(instruction: Instruction, vm: &mut VM) {
             let n = vm.registers[instruction.op1] as usize;
             let _options = vm.registers[instruction.op1 + 1] as usize;
             let path = String::from_utf8(vm.memory[p..p + n].to_vec()).unwrap();
-            match File::open(path) {
+            match File::options().read(true).write(true).open(path) {
                 Ok(f) => {
                     vm.registers[instruction.target] = 0;
                     vm.registers[instruction.op1] = f.as_raw_fd() as u32;
@@ -551,6 +564,44 @@ fn syscall(instruction: Instruction, vm: &mut VM) {
             vm.registers[instruction.op1] = VERSION.minor;
             vm.registers[instruction.op1 + 1] = VERSION.patch;
         }
+        Syscall::Grantpt => unsafe {
+            vm.registers[instruction.op1] = grantpt(vm.registers[instruction.target] as i32) as u32;
+        },
+        Syscall::Unlockpt => unsafe {
+            vm.registers[instruction.op1] =
+                unlockpt(vm.registers[instruction.target] as i32) as u32;
+        },
+        Syscall::Ptsname => unsafe {
+            let n = vm.registers[instruction.op1] as usize;
+            let addr = vm.registers[instruction.op1 + 1] as usize;
+            let c_str = ptsname(vm.registers[instruction.target] as i32);
+            if c_str == std::ptr::null_mut() {
+                vm.registers[instruction.target] = 0;
+                return;
+            }
+            let name = CStr::from_ptr(c_str);
+            let name_len = name.to_bytes().len();
+            let r = if n < name_len { n } else { name_len };
+            vm.memory[addr..addr + r].copy_from_slice(&name.to_bytes()[0..r]);
+            vm.registers[instruction.target] = r as u32;
+        },
+        Syscall::PosixOpenpt => unsafe {
+            let fd = posix_openpt(vm.registers[instruction.op1] as i32);
+            let mut attrs = Termios::from_fd(fd).unwrap();
+            cfmakeraw(&mut attrs);
+            tcsetattr(fd, TCSANOW, &attrs).unwrap();
+            vm.registers[instruction.target] = fd as u32;
+        },
+        Syscall::CfMakeRaw => {
+            let fd = vm.registers[instruction.target] as i32;
+            let mut attrs = Termios::from_fd(fd).unwrap();
+            cfmakeraw(&mut attrs);
+            match tcsetattr(fd, TCSANOW, &attrs) {
+                Ok(_) => vm.registers[instruction.op1] = 1,
+                Err(_) => vm.registers[instruction.op1] = 0,
+            }
+
+        },
     };
 }
 

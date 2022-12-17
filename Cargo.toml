@@ -1,7 +1,9 @@
 [package]
 name = "p3216"
-version = "1.4.1"
+version = "1.6.0"
 authors = ["Eckhart Köppen <eck@40hz.org>"]
 edition = "2018"
 
 [dependencies]
+libc = "0.2.138"
+termios = "0.3.3"

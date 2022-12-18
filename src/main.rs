@@ -1,5 +1,4 @@
-use libc::{posix_openpt, unlockpt, grantpt, ptsname};
-use termios::*;
+use libc::{grantpt, posix_openpt, ptsname, unlockpt};
 use std::ffi::CStr;
 use std::fs::File;
 use std::io::Read;
@@ -8,6 +7,7 @@ use std::mem;
 use std::ops::Not;
 use std::ops::{BitAnd, BitOr, BitXor};
 use std::os::unix::io::{AsRawFd, FromRawFd};
+use termios::*;
 
 struct Version {
     major: u32,
@@ -599,7 +599,7 @@ fn syscall(instruction: Instruction, vm: &mut VM) {
                 Ok(_) => vm.registers[instruction.op1] = 0,
                 Err(_) => vm.registers[instruction.op1] = u32::MAX,
             }
-        },
+        }
         Syscall::SetSpeed => {
             let fd = vm.registers[instruction.target] as i32;
             let mut attrs = Termios::from_fd(fd).unwrap();
@@ -615,7 +615,7 @@ fn syscall(instruction: Instruction, vm: &mut VM) {
                 Ok(_) => vm.registers[instruction.op1] = 0,
                 Err(_) => vm.registers[instruction.op1] = u32::MAX,
             }
-        },
+        }
     };
 }
 

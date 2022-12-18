@@ -31,7 +31,7 @@ const OVERFLOW: u32 = 4;
 const VERSION: Version = Version {
     major: 1,
     minor: 6,
-    patch: 0,
+    patch: 1,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -89,6 +89,7 @@ enum Syscall {
     Ptsname = 20,
     PosixOpenpt = 21,
     CfMakeRaw = 22,
+    SetSpeed = 23,
 }
 
 #[derive(Debug)]
@@ -271,6 +272,7 @@ fn syscall_number(num: u32) -> Syscall {
         20 => Syscall::Ptsname,
         21 => Syscall::PosixOpenpt,
         22 => Syscall::CfMakeRaw,
+        23 => Syscall::SetSpeed,
         _ => Syscall::Quit,
     }
 }
@@ -587,9 +589,6 @@ fn syscall(instruction: Instruction, vm: &mut VM) {
         },
         Syscall::PosixOpenpt => unsafe {
             let fd = posix_openpt(vm.registers[instruction.op1] as i32);
-            let mut attrs = Termios::from_fd(fd).unwrap();
-            cfmakeraw(&mut attrs);
-            tcsetattr(fd, TCSANOW, &attrs).unwrap();
             vm.registers[instruction.target] = fd as u32;
         },
         Syscall::CfMakeRaw => {
@@ -597,10 +596,25 @@ fn syscall(instruction: Instruction, vm: &mut VM) {
             let mut attrs = Termios::from_fd(fd).unwrap();
             cfmakeraw(&mut attrs);
             match tcsetattr(fd, TCSANOW, &attrs) {
-                Ok(_) => vm.registers[instruction.op1] = 1,
-                Err(_) => vm.registers[instruction.op1] = 0,
+                Ok(_) => vm.registers[instruction.op1] = 0,
+                Err(_) => vm.registers[instruction.op1] = u32::MAX,
             }
+        },
+        Syscall::SetSpeed => {
+            let fd = vm.registers[instruction.target] as i32;
+            let mut attrs = Termios::from_fd(fd).unwrap();
 
+            #[cfg(target_os = "macos")]
+            let speed = vm.registers[instruction.op1] as u64;
+            #[cfg(target_os = "linux")]
+            let speed = vm.registers[instruction.op1];
+
+            cfsetispeed(&mut attrs, speed).unwrap();
+            cfsetospeed(&mut attrs, speed).unwrap();
+            match tcsetattr(fd, TCSANOW, &attrs) {
+                Ok(_) => vm.registers[instruction.op1] = 0,
+                Err(_) => vm.registers[instruction.op1] = u32::MAX,
+            }
         },
     };
 }

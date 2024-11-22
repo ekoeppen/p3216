@@ -1,0 +1,13 @@
+image: alpine/edge
+packages:
+  - rust
+  - cargo
+sources:
+  - https://git.sr.ht/~ekoeppen/p3216
+tasks:
+  - build: |
+      cd p3216
+      cargo build --verbose
+  - test: |
+      cd p3216
+      cargo test --verbose

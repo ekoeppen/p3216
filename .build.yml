@@ -2,12 +2,18 @@ image: alpine/edge
 packages:
   - rust
   - cargo
+secrets:
+  - ca99d209-296a-41b7-9eda-454250e4b901
+environment:
+  REPO: p3216
 sources:
   - https://git.sr.ht/~ekoeppen/p3216
+  - https://git.sr.ht/~ekoeppen/build-scripts
 tasks:
   - build: |
-      cd p3216
+      cd ${REPO}
       cargo build --verbose
   - test: |
-      cd p3216
+      cd ${REPO}
       cargo test --verbose
+  - mirror-to-github: ./build-scripts/github-mirror $REPO

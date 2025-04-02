@@ -554,7 +554,7 @@ fn syscall(instruction: Instruction, vm: &mut VM) {
             match std::env::set_current_dir(path) {
                 Ok(f) => {
                     vm.registers[instruction.target] = 0;
-                    mem::forget(f);
+                    let _ = f;
                 }
                 Err(_) => {
                     vm.registers[instruction.target] = u32::MAX;
@@ -686,8 +686,7 @@ fn init(vm: &mut VM) {
     }
 }
 
-fn run(image_file_name: &str, debug: bool) -> std::io::Result<()> {
-    let image = load_image(image_file_name)?;
+fn run(image: Box<[u8; MEMORY_SIZE]>, debug: bool) -> std::io::Result<()> {
     let mut vm = VM {
         debug,
         registers: [0; 16],
@@ -713,14 +712,31 @@ fn run(image_file_name: &str, debug: bool) -> std::io::Result<()> {
     execute(&mut vm);
     Ok(())
 }
+#[cfg(feature = "preload")]
+fn run_preload() {
+    let preload = include_bytes!("../image.bin");
+    let mut image = Box::new([0; MEMORY_SIZE]);
+    image[..preload.len()].copy_from_slice(preload);
+    match run(image, false) {
+        Ok(_) => (),
+        Err(e) => println!("Error {}", e),
+    }
+}
+#[cfg(not(feature = "preload"))]
+fn run_preload() {
+    println!("Usage: p3212 <IMAGE>");
+}
 
 fn main() {
     let debug = false;
     match std::env::args().nth(1) {
-        Some(image_file_name) => match run(&image_file_name, debug) {
-            Ok(_) => (),
+        Some(image_file_name) => match load_image(&image_file_name) {
+            Ok(image) => match run(image, debug) {
+                Ok(_) => (),
+                Err(e) => println!("Error {}", e),
+            },
             Err(e) => println!("Error {}", e),
         },
-        None => println!("Usage: p3212 <IMAGE>"),
+        None => run_preload(),
     }
 }

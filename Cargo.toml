@@ -7,3 +7,6 @@ edition = "2018"
 [dependencies]
 libc = "0.2.138"
 termios = "0.3.3"
+
+[features]
+preload = []

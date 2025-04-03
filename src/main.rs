@@ -2,7 +2,7 @@ use libc::{grantpt, posix_openpt, ptsname, unlockpt};
 use std::ffi::CStr;
 use std::fs::File;
 use std::io::Read;
-use std::io::Write;
+use std::io::{Error, Write};
 use std::mem;
 use std::ops::Not;
 use std::ops::{BitAnd, BitOr, BitXor};
@@ -118,6 +118,7 @@ struct VM {
     registers: [u32; 16],
     memory: Vec<u8>,
     instruction_cache: Vec<Instruction>,
+    args: Vec<String>,
 }
 
 fn print_vm(vm: &VM) {
@@ -154,13 +155,6 @@ fn print_instruction(instruction: Instruction) {
         print!("N ");
     }
     println!();
-}
-
-fn load_image(name: &str) -> std::io::Result<Box<[u8; MEMORY_SIZE]>> {
-    let mut file = File::open(name)?;
-    let mut image = Box::new([0; MEMORY_SIZE]);
-    file.read(&mut *image)?;
-    Ok(image)
 }
 
 fn get_peripheral(_addr: usize) -> u32 {
@@ -523,13 +517,13 @@ fn syscall(instruction: Instruction, vm: &mut VM) {
             vm.registers[instruction.op1] = 0;
         }
         Syscall::Argc => {
-            vm.registers[instruction.target] = std::env::args().count() as u32;
+            vm.registers[instruction.target] = vm.args.len() as u32;
         }
         Syscall::Arg => {
             let a = vm.registers[instruction.target] as usize;
             let n = vm.registers[instruction.op1] as usize;
             let addr = vm.registers[instruction.op1 + 1] as usize;
-            match std::env::args().nth(a) {
+            match vm.args.get(a) {
                 Some(arg) => {
                     let r = if n < arg.len() { n } else { arg.len() };
                     vm.memory[addr..addr + r].copy_from_slice(&arg.as_bytes()[0..r]);
@@ -686,12 +680,33 @@ fn init(vm: &mut VM) {
     }
 }
 
+#[cfg(not(feature = "preload"))]
+fn args() -> Vec<String> {
+    let mut args = Vec::new();
+    for arg in std::env::args() {
+        args.push(arg);
+    }
+    return args;
+}
+
+#[cfg(feature = "preload")]
+fn args() -> Vec<String> {
+    let mut args = Vec::new();
+    args.push(std::env::args().nth(0).unwrap());
+    args.push("image.bin".to_string());
+    for arg in std::env::args().skip(1) {
+        args.push(arg);
+    }
+    return args;
+}
+
 fn run(image: Box<[u8; MEMORY_SIZE]>, debug: bool) -> std::io::Result<()> {
     let mut vm = VM {
         debug,
         registers: [0; 16],
         memory: Vec::new(),
         instruction_cache: Vec::new(),
+        args: args(),
     };
     vm.memory.resize(MEMORY_SIZE, 0);
     vm.instruction_cache.resize(
@@ -712,31 +727,37 @@ fn run(image: Box<[u8; MEMORY_SIZE]>, debug: bool) -> std::io::Result<()> {
     execute(&mut vm);
     Ok(())
 }
+
+#[cfg(not(feature = "preload"))]
+fn load_image(name: Option<String>) -> std::io::Result<Box<[u8; MEMORY_SIZE]>> {
+    match name {
+        Some(name) => {
+            let mut file = File::open(name)?;
+            let mut image = Box::new([0; MEMORY_SIZE]);
+            file.read(&mut *image)?;
+            Ok(image)
+        }
+        None => {
+            println!("Usage: p3212 <IMAGE>");
+            return Err(Error::other("image argument missing"));
+        }
+    }
+}
+
 #[cfg(feature = "preload")]
-fn run_preload() {
+fn load_image(_name: Option<String>) -> std::io::Result<Box<[u8; MEMORY_SIZE]>> {
     let preload = include_bytes!("../image.bin");
     let mut image = Box::new([0; MEMORY_SIZE]);
     image[..preload.len()].copy_from_slice(preload);
-    match run(image, false) {
-        Ok(_) => (),
-        Err(e) => println!("Error {}", e),
-    }
-}
-#[cfg(not(feature = "preload"))]
-fn run_preload() {
-    println!("Usage: p3212 <IMAGE>");
+    Ok(image)
 }
 
-fn main() {
+fn main() -> Result<(), std::io::Error> {
     let debug = false;
-    match std::env::args().nth(1) {
-        Some(image_file_name) => match load_image(&image_file_name) {
-            Ok(image) => match run(image, debug) {
-                Ok(_) => (),
-                Err(e) => println!("Error {}", e),
-            },
-            Err(e) => println!("Error {}", e),
-        },
-        None => run_preload(),
+    match load_image(std::env::args().nth(1)) {
+        Ok(image) => run(image, debug),
+        Err(e) => {
+            return Err(e);
+        }
     }
 }
